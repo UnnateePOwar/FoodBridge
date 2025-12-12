@@ -1,101 +1,46 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-import {
-  getFirestore,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  setDoc,
-  deleteDoc
-} from "https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore.js";
-
-// Firebase config: replace the placeholder values with your project's config
-const firebaseConfig = {
-  apiKey: "REPLACE_WITH_YOUR_API_KEY",
-  authDomain: "REPLACE_WITH_YOUR_PROJECT.firebaseapp.com",
-  projectId: "REPLACE_WITH_YOUR_PROJECT_ID",
-  storageBucket: "REPLACE_WITH_YOUR_PROJECT.appspot.com",
-  messagingSenderId: "REPLACE_WITH_YOUR_SENDER_ID",
-  appId: "REPLACE_WITH_YOUR_APP_ID"
+// Storage keys
+const STORAGE = {
+  REQUESTS: 'foodbridge_requests',
+  USERS: 'foodbridge_users',
+  SESSION: 'foodbridge_session'
 };
 
-const app = initializeApp(firebaseConfig);
-const firestore = getFirestore(app);
-
-// In-memory cache to keep most of the UI synchronous
-const CACHE = { requests: [], users: {}, session: null };
-
-async function initData() {
-  // Load requests collection
-  try {
-    const q = await getDocs(collection(firestore, 'requests'));
-    CACHE.requests = q.docs.map(d => d.data()).sort((a,b)=> (b.created_date || '') > (a.created_date || '') ? 1 : -1);
-  } catch (err) {
-    console.warn('Could not load requests from Firestore:', err);
-    CACHE.requests = [];
-  }
-
-  // Load users and session stored under meta docs
-  try {
-    const usersDoc = await getDoc(doc(firestore, 'meta', 'users'));
-    CACHE.users = usersDoc.exists() ? usersDoc.data().value : {};
-  } catch (err) {
-    console.warn('Could not load users from Firestore:', err);
-    CACHE.users = {};
-  }
-
-  try {
-    const sessionDoc = await getDoc(doc(firestore, 'meta', 'session'));
-    CACHE.session = sessionDoc.exists() ? sessionDoc.data().value : null;
-  } catch (err) {
-    console.warn('Could not load session from Firestore:', err);
-    CACHE.session = null;
-  }
-}
-
-// Data functions backed by Firestore (and CACHE for sync access)
+// Data functions
 const db = {
-  getRequests: () => CACHE.requests,
-  saveRequests: async (r) => {
-    CACHE.requests = r;
-    try {
-      const ops = r.map(item => setDoc(doc(firestore, 'requests', String(item.id)), item));
-      await Promise.all(ops);
-    } catch (err) {
-      console.warn('Failed to save requests to Firestore:', err);
-    }
-  },
-
-  getUsers: () => CACHE.users,
-  saveUsers: async (u) => {
-    CACHE.users = u;
-    try {
-      await setDoc(doc(firestore, 'meta', 'users'), { value: u });
-    } catch (err) {
-      console.warn('Failed to save users to Firestore:', err);
-    }
-  },
-
-  getSession: () => CACHE.session,
-  saveSession: async (s) => {
-    CACHE.session = s;
-    try {
-      await setDoc(doc(firestore, 'meta', 'session'), { value: s });
-    } catch (err) {
-      console.warn('Failed to save session to Firestore:', err);
-    }
-  },
-  clearSession: async () => {
-    CACHE.session = null;
-    try {
-      await deleteDoc(doc(firestore, 'meta', 'session'));
-    } catch (err) {
-      // ignore
-    }
-  }
+  getRequests: () => JSON.parse(localStorage.getItem(STORAGE.REQUESTS) || '[]'),
+  saveRequests: (r) => localStorage.setItem(STORAGE.REQUESTS, JSON.stringify(r)),
+  
+  getUsers: () => JSON.parse(localStorage.getItem(STORAGE.USERS) || '{}'),
+  saveUsers: (u) => localStorage.setItem(STORAGE.USERS, JSON.stringify(u)),
+  
+  getSession: () => JSON.parse(localStorage.getItem(STORAGE.SESSION) || 'null'),
+  saveSession: (s) => localStorage.setItem(STORAGE.SESSION, JSON.stringify(s)),
+  clearSession: () => localStorage.removeItem(STORAGE.SESSION)
 };
 
-// Note: initial seeding happens during async startup below.
+// Initialize sample data
+if (db.getRequests().length === 0) {
+  db.saveRequests([
+    {
+      id: Date.now(),
+      requester_name: 'Dia Sharma(Mock)',
+      contact_phone: '+91 9988776655',
+      address: '123 Park Lane',
+      city: 'Mumbai',
+      state: 'MH',
+      zip_code: '400001',
+      latitude: 19.0760,
+      longitude: 72.8777,
+      household_size: 4,
+      dietary_restrictions: '',
+      urgency_level: 'medium',
+      food_types_needed: ['meals', 'bread'],
+      additional_notes: 'Can collect after 5pm',
+      status: 'active',
+      created_date: new Date().toISOString()
+    }
+  ]);
+}
 
 // DOM elements
 const root = document.getElementById('view');
@@ -283,7 +228,7 @@ function renderRequestForm() {
     
     const requests = db.getRequests();
     requests.unshift(request);
-    await db.saveRequests(requests);
+    db.saveRequests(requests);
     
     alert('Request submitted!');
     location.hash = '#home';
@@ -372,8 +317,8 @@ function renderProfile() {
   document.getElementById('loginBtn').onclick = () => showAuth('login');
   document.getElementById('registerBtn').onclick = () => showAuth('register');
   if (session) {
-    document.getElementById('logoutBtn').onclick = async () => {
-      await db.clearSession();
+    document.getElementById('logoutBtn').onclick = () => {
+      db.clearSession();
       updateUI();
       location.hash = '#home';
     };
@@ -390,14 +335,14 @@ function renderProfile() {
         </form>
       `;
       
-      document.getElementById('loginForm').onsubmit = async (e) => {
+      document.getElementById('loginForm').onsubmit = (e) => {
         e.preventDefault();
         const email = document.getElementById('email').value.trim();
         const password = document.getElementById('password').value;
         const users = db.getUsers();
         
         if (users[email] && users[email].password === password) {
-          await db.saveSession(users[email]);
+          db.saveSession(users[email]);
           updateUI();
           location.hash = '#home';
         } else {
@@ -421,7 +366,7 @@ function renderProfile() {
         </form>
       `;
       
-      document.getElementById('registerForm').onsubmit = async (e) => {
+      document.getElementById('registerForm').onsubmit = (e) => {
         e.preventDefault();
         const name = document.getElementById('name').value.trim();
         const email = document.getElementById('email').value.trim();
@@ -435,8 +380,8 @@ function renderProfile() {
         }
         
         users[email] = { full_name: name, email, password, user_type: type };
-        await db.saveUsers(users);
-        await db.saveSession(users[email]);
+        db.saveUsers(users);
+        db.saveSession(users[email]);
         
         updateUI();
         location.hash = '#home';
@@ -454,34 +399,11 @@ function contact(phone) {
   }
 }
 
-// Async startup: load data from Firestore, seed if empty, then render
-(async function start() {
-  await initData();
-
-  if (db.getRequests().length === 0) {
-    await db.saveRequests([
-      {
-        id: Date.now(),
-        requester_name: 'Dia Sharma(Mock)',
-        contact_phone: '+91 9988776655',
-        address: '123 Park Lane',
-        city: 'Mumbai',
-        state: 'MH',
-        zip_code: '400001',
-        latitude: 19.0760,
-        longitude: 72.8777,
-        household_size: 4,
-        dietary_restrictions: '',
-        urgency_level: 'medium',
-        food_types_needed: ['meals', 'bread'],
-        additional_notes: 'Can collect after 5pm',
-        status: 'active',
-        created_date: new Date().toISOString()
-      }
-    ]);
-  }
-
-  updateUI();
+// Initialize
+updateUI();
+if (location.hash) {
   const hash = location.hash.replace('#', '') || 'home';
-  if (routes[hash]) routes[hash](); else renderHome();
-})();
+  if (routes[hash]) routes[hash]();
+} else {
+  renderHome();
+}
